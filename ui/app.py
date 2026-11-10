@@ -1,4 +1,7 @@
+import base64
+import os
 import sys
+import tempfile
 import webbrowser
 from pathlib import Path
 
@@ -8,7 +11,7 @@ sys.path.append(str(ROOT))
 import gradio as gr
 from agents.supervisor import supervisor
 from utils.email_confirmation import clear_pending, run_turn
-from utils.voice import speak, transcribe
+from utils.voice import transcribe
 
 
 # ==================================================================== #
@@ -38,22 +41,10 @@ def ask_supervisor(messages):
     return response["messages"][-1].content
 
 
-def reply_audio(text, speak_replies):
-    """Return a spoken version of the reply, or None if voice is off."""
-    if not speak_replies:
-        return None
-    try:
-        return speak(text)
-    except Exception as error:
-        # Speech is optional: never let it break the chat
-        print(f"Text-to-speech failed: {error}")
-        return None
-
-
-def respond(message, history, speak_replies=False):
+def respond(message, history):
     """Send the user message to the Supervisor agent and append the reply."""
     if not message or not message.strip():
-        return "", history, gr.update(), None
+        return "", history, gr.update()
 
     history = history or []
     messages = history[-10:].copy()
@@ -65,45 +56,53 @@ def respond(message, history, speak_replies=False):
     history.append({"role": "assistant", "content": assistant_reply})
 
     # Hide the welcome panel once the conversation has started
-    return (
-        "",
-        history,
-        gr.update(visible=False),
-        reply_audio(assistant_reply, speak_replies),
+    return "", history, gr.update(visible=False)
+
+
+def dictate(text, audio_data):
+    """
+    Turn a recording from the mic button into text in the message box.
+
+    `audio_data` is filled in by the browser (see MIC_JS): empty when
+    recording starts, a base64 data URL when it stops, or "ERROR:..." if
+    the microphone could not be used.
+    """
+    if not audio_data:
+        return gr.update(), ""
+
+    if audio_data.startswith("ERROR:"):
+        gr.Warning(f"Microphone not available: {audio_data[6:]}")
+        return gr.update(), ""
+
+    header, encoded = audio_data.split(",", 1)
+    extension = next(
+        (ext for ext in ("ogg", "mp4", "wav") if ext in header), "webm"
     )
 
-
-def voice_respond(audio_path, history, speak_replies):
-    """Transcribe a voice message, then handle it like a typed one."""
-    if not audio_path:
-        return None, history, gr.update(), None
-
+    fd, path = tempfile.mkstemp(suffix=f".{extension}")
     try:
-        message = transcribe(audio_path)
+        with os.fdopen(fd, "wb") as audio_file:
+            audio_file.write(base64.b64decode(encoded))
+        heard = transcribe(path)
     except Exception as error:
-        history = (history or []) + [{
-            "role": "assistant",
-            "content": f"❌ Sorry, I couldn't transcribe that: {error}",
-        }]
-        return None, history, gr.update(visible=False), None
+        gr.Warning(f"Couldn't transcribe that: {error}")
+        return gr.update(), ""
+    finally:
+        os.remove(path)
 
-    if not message:
-        history = (history or []) + [{
-            "role": "assistant",
-            "content": "🎤 I didn't catch that. Please try again.",
-        }]
-        return None, history, gr.update(visible=False), None
+    if not heard:
+        gr.Info("I didn't catch that. Please try again.")
+        return gr.update(), ""
 
-    _, history, panel, audio = respond(message, history, speak_replies)
-
-    # Clear the recorder so it's ready for the next message
-    return None, history, panel, audio
+    # Add to whatever is already typed, so you can edit before sending
+    text = (text or "").rstrip()
+    return (f"{text} {heard}" if text else heard), ""
 
 
 def clear_chat():
     """Reset the conversation and bring back the welcome panel."""
     clear_pending()
-    return [], gr.update(visible=True), None
+    return [], gr.update(visible=True)
 
 
 def open_calendar():
@@ -388,9 +387,65 @@ footer{ display:none !important; }
     margin-top:6px;
 }
 
-.voice-row{
-    margin-top:8px;
-    gap:10px;
+/* Mic button inside the message box */
+.input-box{
+    position:relative !important;
+}
+
+.input-box textarea{
+    padding-right:48px !important;
+}
+
+#mic-btn{
+    --mic-icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='9' y='2' width='6' height='12' rx='3'/%3E%3Cpath d='M5 10v1a7 7 0 0 0 14 0v-1'/%3E%3Cpath d='M12 18v4'/%3E%3C/svg%3E");
+    position:absolute !important;
+    right:8px;
+    top:50%;
+    transform:translateY(-50%);
+    z-index:5;
+    width:34px !important;
+    min-width:34px !important;
+    max-width:34px !important;
+    height:34px !important;
+    padding:0 !important;
+    border:none !important;
+    border-radius:50% !important;
+    background:transparent !important;
+    box-shadow:none !important;
+    color:var(--text-dim) !important;
+    font-size:0 !important;
+}
+
+#mic-btn::before{
+    content:"";
+    display:block;
+    width:18px;
+    height:18px;
+    margin:auto;
+    background-color:currentColor;
+    -webkit-mask:var(--mic-icon) center / contain no-repeat;
+    mask:var(--mic-icon) center / contain no-repeat;
+}
+
+#mic-btn:hover{
+    background:var(--surface-alt) !important;
+    color:var(--text-main) !important;
+}
+
+#mic-btn.recording{
+    background:#fee2e2 !important;
+    color:#dc2626 !important;
+    animation:mic-pulse 1.2s ease-in-out infinite;
+}
+
+#mic-btn.busy{
+    opacity:.45;
+    pointer-events:none;
+}
+
+@keyframes mic-pulse{
+    0%,100%{ box-shadow:0 0 0 0 rgba(220,38,38,.35); }
+    50%{ box-shadow:0 0 0 6px rgba(220,38,38,0); }
 }
 
 textarea{
@@ -412,6 +467,48 @@ textarea{
 
 button{
     border-radius:var(--radius-md) !important;
+}
+"""
+
+
+# Browser-side recording for the mic button. Returns [text, audio]:
+# audio is "" when recording starts, a base64 data URL when it stops,
+# or "ERROR:<reason>" if the microphone can't be used.
+MIC_JS = """
+async (text, _audio) => {
+    const btn = document.querySelector('#mic-btn');
+
+    if (!window.__micRecording) {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const recorder = new MediaRecorder(stream);
+            const chunks = [];
+            recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+            recorder.start();
+            window.__micRecording = { recorder, chunks, stream };
+            btn.classList.add('recording');
+            btn.title = 'Stop recording';
+            return [text, ''];
+        } catch (err) {
+            return [text, 'ERROR:' + (err.message || err.name)];
+        }
+    }
+
+    const { recorder, chunks, stream } = window.__micRecording;
+    window.__micRecording = null;
+    await new Promise((resolve) => { recorder.onstop = resolve; recorder.stop(); });
+    stream.getTracks().forEach((track) => track.stop());
+    btn.classList.remove('recording');
+    btn.classList.add('busy');
+    btn.title = 'Voice input';
+
+    const blob = new Blob(chunks, { type: recorder.mimeType });
+    const dataUrl = await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.readAsDataURL(blob);
+    });
+    return [text, dataUrl];
 }
 """
 
@@ -502,32 +599,17 @@ with gr.Blocks(
                 )
 
                 with gr.Row(elem_classes="input-row"):
-                    textbox = gr.Textbox(
-                        placeholder="Message your assistant...",
-                        scale=8,
-                        show_label=False,
-                        container=False,
-                    )
+                    with gr.Column(scale=8, elem_classes="input-box"):
+                        textbox = gr.Textbox(
+                            placeholder="Message your assistant...",
+                            show_label=False,
+                            container=False,
+                        )
+                        mic = gr.Button("Voice input", elem_id="mic-btn")
                     send = gr.Button("Send", elem_id="send-btn", scale=1)
 
-                # ---------------- Voice ---------------- #
-                with gr.Row(elem_classes="voice-row", equal_height=True):
-                    mic = gr.Audio(
-                        sources=["microphone"],
-                        type="filepath",
-                        label="🎤 Voice message",
-                        scale=3,
-                    )
-                    with gr.Column(scale=2, min_width=200):
-                        speak_replies = gr.Checkbox(
-                            label="🔊 Speak replies aloud",
-                            value=True,
-                        )
-                        spoken_reply = gr.Audio(
-                            label="Last reply",
-                            autoplay=True,
-                            interactive=False,
-                        )
+                # Carries the recording from the browser to dictate()
+                mic_audio = gr.Textbox(visible=False)
 
     # ==================================================================== #
     #  Events
@@ -535,25 +617,31 @@ with gr.Blocks(
 
     send.click(
         fn=respond,
-        inputs=[textbox, chatbot, speak_replies],
-        outputs=[textbox, chatbot, welcome_panel, spoken_reply],
+        inputs=[textbox, chatbot],
+        outputs=[textbox, chatbot, welcome_panel],
     )
 
     textbox.submit(
         fn=respond,
-        inputs=[textbox, chatbot, speak_replies],
-        outputs=[textbox, chatbot, welcome_panel, spoken_reply],
+        inputs=[textbox, chatbot],
+        outputs=[textbox, chatbot, welcome_panel],
     )
 
-    mic.stop_recording(
-        fn=voice_respond,
-        inputs=[mic, chatbot, speak_replies],
-        outputs=[mic, chatbot, welcome_panel, spoken_reply],
+    # First click starts recording in the browser; second click stops it
+    # and sends the audio to dictate(), which fills in the message box.
+    mic.click(
+        fn=dictate,
+        inputs=[textbox, mic_audio],
+        outputs=[textbox, mic_audio],
+        js=MIC_JS,
+    ).then(
+        fn=None,
+        js="() => document.querySelector('#mic-btn')?.classList.remove('busy')",
     )
 
     new_chat.click(
         fn=clear_chat,
-        outputs=[chatbot, welcome_panel, spoken_reply],
+        outputs=[chatbot, welcome_panel],
     )
 
     for ex_btn in (ex1, ex2, ex3, ex4):
