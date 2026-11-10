@@ -7,6 +7,7 @@ sys.path.append(str(ROOT))
 
 import gradio as gr
 from agents.supervisor import supervisor
+from utils.email_confirmation import clear_pending, run_turn
 
 
 # ==================================================================== #
@@ -30,6 +31,12 @@ theme = gr.themes.Soft(
 #  Backend functions
 # ==================================================================== #
 
+def ask_supervisor(messages):
+    """Send the conversation to the Supervisor agent and return its reply."""
+    response = supervisor.invoke({"messages": messages})
+    return response["messages"][-1].content
+
+
 def respond(message, history):
     """Send the user message to the Supervisor agent and append the reply."""
     if not message or not message.strip():
@@ -39,8 +46,7 @@ def respond(message, history):
     messages = history[-10:].copy()
     messages.append({"role": "user", "content": message})
 
-    response = supervisor.invoke({"messages": messages})
-    assistant_reply = response["messages"][-1].content
+    assistant_reply = run_turn(messages, ask_supervisor)
 
     history.append({"role": "user", "content": message})
     history.append({"role": "assistant", "content": assistant_reply})
@@ -51,6 +57,7 @@ def respond(message, history):
 
 def clear_chat():
     """Reset the conversation and bring back the welcome panel."""
+    clear_pending()
     return [], gr.update(visible=True)
 
 

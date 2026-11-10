@@ -1,28 +1,27 @@
 from langchain_core.tools import tool
 
-from integrations.gmail import (
-    send_email,
-    list_unread_emails,
-)
+from integrations.gmail import list_unread_emails
+from utils.email_confirmation import save_draft
 
 
 @tool
-def send_email_tool(
+def draft_email_tool(
     to: str,
     subject: str,
     body: str,
 ):
-    """Send an email using Gmail."""
+    """
+    Prepare an email for the user to review.
 
-    message_id = send_email(
-        to=to,
-        subject=subject,
-        body=body,
-    )
+    This does NOT send the email. The draft is shown to the user, and it is
+    sent only if the user confirms it.
+    """
+
+    save_draft(to=to, subject=subject, body=body)
 
     return (
-        f"Email sent successfully!\n"
-        f"Message ID: {message_id}"
+        "Draft saved. It will be shown to the user, who must confirm it "
+        "before it is sent. The email has NOT been sent."
     )
 
 

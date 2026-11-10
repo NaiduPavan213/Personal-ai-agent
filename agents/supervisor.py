@@ -1,10 +1,26 @@
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 from langchain.agents import create_agent
+
+from config import TIMEZONE
 
 from utils.llm import llm
 from agents.calendar_agent import calendar_agent
 from agents.email_agent import email_agent
 from langchain_core.tools import tool
 from prompts.supervisor_prompt import SUPERVISOR_PROMPT
+
+def with_current_time(query: str) -> str:
+    """Prefix a query with the current date/time so agents can resolve
+    relative dates like "tomorrow" or "next Friday"."""
+
+    now = datetime.now(ZoneInfo(TIMEZONE))
+    return (
+        f"Current date and time: {now:%A, %Y-%m-%d %H:%M} ({TIMEZONE}).\n\n"
+        f"{query}"
+    )
+
 
 @tool(return_direct=True)
 def calendar_assistant(query: str) -> str:
@@ -15,7 +31,7 @@ def calendar_assistant(query: str) -> str:
             "messages": [
                 {
                     "role": "user",
-                    "content": query
+                    "content": with_current_time(query)
                 }
             ]
         }
@@ -33,7 +49,7 @@ def email_assistant(query: str) -> str:
             "messages": [
                 {
                     "role": "user",
-                    "content": query
+                    "content": with_current_time(query)
                 }
             ]
         }

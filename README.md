@@ -10,6 +10,7 @@ A modern AI-powered Personal Assistant built using  **LangChain**, **OpenRouter*
 - 🤖 Supervisor Agent for intelligent task routing
 - 📧 Gmail Integration
   - Send emails using natural language
+  - Every email is shown as a draft and sent only after you reply **send**
 - 📅 Google Calendar Integration
   - Create calendar events
   - Schedule meetings
@@ -120,8 +121,15 @@ A `token.json` file will automatically be generated.
 Create a `.env` file.
 
 ```env
-OPENROUTER_API_KEY=your_api_key
+GROQ_API_KEY=your_groq_api_key
+OPENROUTER_API_KEY=your_openrouter_api_key
+GEMINI_API_KEY=your_gemini_api_key
+
+# Optional: IANA time zone for calendar events (default: Asia/Kolkata)
+TIMEZONE=Asia/Kolkata
 ```
+
+Groq is used first; OpenRouter and then Gemini are used as fallbacks if a provider fails.
 
 ---
 

@@ -7,6 +7,7 @@ from langchain_groq import ChatGroq
 
 load_dotenv()
 
+# Primary provider: Groq
 groq_llm = ChatGroq(
     model="openai/gpt-oss-120b",
     groq_api_key=os.getenv("GROQ_API_KEY"),
@@ -14,7 +15,7 @@ groq_llm = ChatGroq(
     max_tokens=1000,
 )
 
-# Primary provider: Google Gemini
+# Second backup: Google Gemini
 primary_llm = ChatGoogleGenerativeAI(
     model="gemini-3.8-flash",
     google_api_key=os.getenv("GEMINI_API_KEY"),
@@ -23,7 +24,7 @@ primary_llm = ChatGoogleGenerativeAI(
     max_retries=1,
 )
 
-# Backup provider: OpenRouter free models
+# First backup: OpenRouter free models
 backup_llm = ChatOpenAI(
     model="openrouter/free",
     api_key=os.getenv("OPENROUTER_API_KEY"),
@@ -32,7 +33,7 @@ backup_llm = ChatOpenAI(
     max_tokens=1000,
 )
 
-# Automatically switch to backup if primary fails
+# Try Groq first, then OpenRouter, then Gemini if a provider fails
 llm = groq_llm.with_fallbacks([backup_llm, primary_llm])
 
-print("LLM providers configured: Gemini -> OpenRouter")
+print("LLM providers configured: Groq -> OpenRouter -> Gemini")

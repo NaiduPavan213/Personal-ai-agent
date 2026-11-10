@@ -1,4 +1,22 @@
 from agents.supervisor import supervisor
+from utils.email_confirmation import run_turn
+
+
+def content_to_text(content):
+    """Some models return a list of content blocks instead of a string."""
+    if isinstance(content, list):
+        return "\n".join(
+            item["text"]
+            for item in content
+            if isinstance(item, dict) and item.get("type") == "text"
+        )
+    return content
+
+
+def ask_supervisor(messages):
+    response = supervisor.invoke({"messages": messages})
+    return content_to_text(response["messages"][-1].content)
+
 
 print("🤖 Personal Assistant")
 print("Type 'exit' to quit.\n")
@@ -12,26 +30,11 @@ while True:
     if user_input.lower() == "exit":
         break
 
-    # Add the user's message
-    messages.append({
-        "role": "user",
-        "content": user_input
-    })
+    messages.append({"role": "user", "content": user_input})
 
-    # Send the entire conversation to the agent
-    response = supervisor.invoke({
-        "messages": messages
-    })
+    # Handles email confirmation, otherwise asks the supervisor
+    reply = run_turn(messages, ask_supervisor)
 
-    # Get the assistant's reply
-    assistant_message = response["messages"][-1]
+    messages.append({"role": "assistant", "content": reply})
 
-    # Save the assistant's reply
-    messages.append(assistant_message)
-
-    if isinstance(assistant_message.content, list):
-     for item in assistant_message.content:
-        if item.get("type") == "text":
-            print("\nAssistant:", item["text"])
-    else:
-     print("\nAssistant:", assistant_message.content)
+    print("\nAssistant:", reply)

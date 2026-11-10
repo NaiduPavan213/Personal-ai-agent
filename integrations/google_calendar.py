@@ -1,11 +1,10 @@
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from googleapiclient.discovery import build
 
+from config import TIMEZONE
 from integrations.auth import authenticate_google
-from googleapiclient.discovery import build
-from datetime import datetime, timezone
-from integrations.auth import authenticate_google
+
 
 def create_google_calendar_event(
     title: str,
@@ -24,23 +23,24 @@ def create_google_calendar_event(
         credentials=creds,
     )
 
-    # Convert strings into datetime
+    # Convert strings into datetime (date: YYYY-MM-DD, time: HH:MM 24-hour)
     start = datetime.strptime(
         f"{date} {time}",
         "%Y-%m-%d %H:%M"
     )
 
-    end = start.replace(hour=start.hour + 1)
+    # timedelta handles events that cross midnight (e.g. 23:30)
+    end = start + timedelta(hours=1)
 
     event = {
         "summary": title,
         "start": {
             "dateTime": start.isoformat(),
-            "timeZone": "Asia/Kolkata",
+            "timeZone": TIMEZONE,
         },
         "end": {
             "dateTime": end.isoformat(),
-            "timeZone": "Asia/Kolkata",
+            "timeZone": TIMEZONE,
         },
     }
 
