@@ -8,6 +8,7 @@ sys.path.append(str(ROOT))
 import gradio as gr
 from agents.supervisor import supervisor
 from utils.email_confirmation import clear_pending, run_turn
+from utils.voice import speak, transcribe
 
 
 # ==================================================================== #
@@ -37,10 +38,22 @@ def ask_supervisor(messages):
     return response["messages"][-1].content
 
 
-def respond(message, history):
+def reply_audio(text, speak_replies):
+    """Return a spoken version of the reply, or None if voice is off."""
+    if not speak_replies:
+        return None
+    try:
+        return speak(text)
+    except Exception as error:
+        # Speech is optional: never let it break the chat
+        print(f"Text-to-speech failed: {error}")
+        return None
+
+
+def respond(message, history, speak_replies=False):
     """Send the user message to the Supervisor agent and append the reply."""
     if not message or not message.strip():
-        return "", history, gr.update()
+        return "", history, gr.update(), None
 
     history = history or []
     messages = history[-10:].copy()
@@ -52,13 +65,45 @@ def respond(message, history):
     history.append({"role": "assistant", "content": assistant_reply})
 
     # Hide the welcome panel once the conversation has started
-    return "", history, gr.update(visible=False)
+    return (
+        "",
+        history,
+        gr.update(visible=False),
+        reply_audio(assistant_reply, speak_replies),
+    )
+
+
+def voice_respond(audio_path, history, speak_replies):
+    """Transcribe a voice message, then handle it like a typed one."""
+    if not audio_path:
+        return None, history, gr.update(), None
+
+    try:
+        message = transcribe(audio_path)
+    except Exception as error:
+        history = (history or []) + [{
+            "role": "assistant",
+            "content": f"❌ Sorry, I couldn't transcribe that: {error}",
+        }]
+        return None, history, gr.update(visible=False), None
+
+    if not message:
+        history = (history or []) + [{
+            "role": "assistant",
+            "content": "🎤 I didn't catch that. Please try again.",
+        }]
+        return None, history, gr.update(visible=False), None
+
+    _, history, panel, audio = respond(message, history, speak_replies)
+
+    # Clear the recorder so it's ready for the next message
+    return None, history, panel, audio
 
 
 def clear_chat():
     """Reset the conversation and bring back the welcome panel."""
     clear_pending()
-    return [], gr.update(visible=True)
+    return [], gr.update(visible=True), None
 
 
 def open_calendar():
@@ -343,6 +388,11 @@ footer{ display:none !important; }
     margin-top:6px;
 }
 
+.voice-row{
+    margin-top:8px;
+    gap:10px;
+}
+
 textarea{
     border-radius:var(--radius-md) !important;
     border:1px solid var(--border) !important;
@@ -460,25 +510,50 @@ with gr.Blocks(
                     )
                     send = gr.Button("Send", elem_id="send-btn", scale=1)
 
+                # ---------------- Voice ---------------- #
+                with gr.Row(elem_classes="voice-row", equal_height=True):
+                    mic = gr.Audio(
+                        sources=["microphone"],
+                        type="filepath",
+                        label="🎤 Voice message",
+                        scale=3,
+                    )
+                    with gr.Column(scale=2, min_width=200):
+                        speak_replies = gr.Checkbox(
+                            label="🔊 Speak replies aloud",
+                            value=True,
+                        )
+                        spoken_reply = gr.Audio(
+                            label="Last reply",
+                            autoplay=True,
+                            interactive=False,
+                        )
+
     # ==================================================================== #
     #  Events
     # ==================================================================== #
 
     send.click(
         fn=respond,
-        inputs=[textbox, chatbot],
-        outputs=[textbox, chatbot, welcome_panel],
+        inputs=[textbox, chatbot, speak_replies],
+        outputs=[textbox, chatbot, welcome_panel, spoken_reply],
     )
 
     textbox.submit(
         fn=respond,
-        inputs=[textbox, chatbot],
-        outputs=[textbox, chatbot, welcome_panel],
+        inputs=[textbox, chatbot, speak_replies],
+        outputs=[textbox, chatbot, welcome_panel, spoken_reply],
+    )
+
+    mic.stop_recording(
+        fn=voice_respond,
+        inputs=[mic, chatbot, speak_replies],
+        outputs=[mic, chatbot, welcome_panel, spoken_reply],
     )
 
     new_chat.click(
         fn=clear_chat,
-        outputs=[chatbot, welcome_panel],
+        outputs=[chatbot, welcome_panel, spoken_reply],
     )
 
     for ex_btn in (ex1, ex2, ex3, ex4):

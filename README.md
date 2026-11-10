@@ -15,6 +15,9 @@ A modern AI-powered Personal Assistant built using  **LangChain**, **OpenRouter*
   - Create calendar events
   - Schedule meetings
 - 💬 Modern Gradio Chat Interface
+- 🎤 Voice Assistance
+  - Speak your request (transcribed with Groq Whisper)
+  - Hear replies read aloud (edge-tts neural voices, no extra API key)
 - ☁️ Google OAuth Authentication
 - ⚡ Powered by OpenRouter LLMs
 - 🛠 Modular and Scalable Architecture
@@ -127,6 +130,13 @@ GEMINI_API_KEY=your_gemini_api_key
 
 # Optional: IANA time zone for calendar events (default: Asia/Kolkata)
 TIMEZONE=Asia/Kolkata
+```
+
+Voice messages are transcribed with Groq Whisper, so voice input also needs `GROQ_API_KEY`. Optional voice settings:
+
+```env
+TTS_VOICE=en-US-AriaNeural          # any voice from: edge-tts --list-voices
+STT_MODEL=whisper-large-v3-turbo
 ```
 
 Groq is used first; OpenRouter and then Gemini are used as fallbacks if a provider fails.
