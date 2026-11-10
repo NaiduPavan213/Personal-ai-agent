@@ -17,6 +17,9 @@ A modern AI-powered Personal Assistant built using  **LangChain**, **OpenRouter*
 - 💬 Modern Gradio Chat Interface
 - 🎤 Voice Input
   - Speak your request instead of typing (transcribed with Groq Whisper)
+- 🖼️ Images
+  - Attach an image with the 📎 button and ask questions about it (Gemini vision)
+  - Email the image as an attachment ("send this image to …")
 - ☁️ Google OAuth Authentication
 - ⚡ Powered by OpenRouter LLMs
 - 🛠 Modular and Scalable Architecture
@@ -135,6 +138,12 @@ Voice messages are transcribed with Groq Whisper, so voice input also needs `GRO
 
 ```env
 STT_MODEL=whisper-large-v3-turbo
+```
+
+Image questions use Gemini, so they need `GEMINI_API_KEY`. Optional:
+
+```env
+VISION_MODEL=gemini-3.5-flash       # falls back to gemini-3.5-flash-lite
 ```
 
 Groq is used first; OpenRouter and then Gemini are used as fallbacks if a provider fails.

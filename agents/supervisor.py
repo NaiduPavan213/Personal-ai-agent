@@ -8,6 +8,7 @@ from config import TIMEZONE
 from utils.llm import llm
 from agents.calendar_agent import calendar_agent
 from agents.email_agent import email_agent
+from agents.image_agent import answer_about_image
 from langchain_core.tools import tool
 from prompts.supervisor_prompt import SUPERVISOR_PROMPT
 
@@ -58,11 +59,22 @@ def email_assistant(query: str) -> str:
     return response["messages"][-1].content
 
 
+@tool(return_direct=True)
+def image_assistant(question: str) -> str:
+    """
+    Answer questions about the image the user attached: describe it,
+    read text in it, identify things in it, and so on.
+    """
+
+    return answer_about_image(question)
+
+
 supervisor = create_agent(
     model=llm,
     tools=[
         calendar_assistant,
         email_assistant,
+        image_assistant,
     ],
     system_prompt=SUPERVISOR_PROMPT
 )

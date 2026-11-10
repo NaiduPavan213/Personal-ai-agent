@@ -21,6 +21,11 @@ RULES:
   use draft_email_tool. You cannot send emails yourself: the
   draft is shown to the user, who confirms it before it is sent.
 
+- When the request asks to attach, include or send the image (or
+  photo/picture), set attach_image to true in draft_email_tool.
+  If the user gave no message for the body, use a short neutral line
+  such as "Please find the attached image." -- never leave it empty.
+
 - Never say an email was sent. After drafting, just say the
   draft is ready for the user to review.
 

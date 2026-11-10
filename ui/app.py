@@ -9,7 +9,9 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.append(str(ROOT))
 
 import gradio as gr
+from agents.image_agent import content_to_text
 from agents.supervisor import supervisor
+from utils.attachments import check_image, clear_image, set_image
 from utils.email_confirmation import clear_pending, run_turn
 from utils.voice import transcribe
 
@@ -38,25 +40,90 @@ theme = gr.themes.Soft(
 def ask_supervisor(messages):
     """Send the conversation to the Supervisor agent and return its reply."""
     response = supervisor.invoke({"messages": messages})
-    return response["messages"][-1].content
+    return content_to_text(response["messages"][-1].content)
 
 
-def respond(message, history):
-    """Send the user message to the Supervisor agent and append the reply."""
-    if not message or not message.strip():
-        return "", history, gr.update()
+def _image_note(name):
+    return f"[Image attached: {name}]"
+
+
+def to_llm_messages(history):
+    """
+    Convert chat history into plain-text messages for the language models.
+
+    The chat stores images as file blocks; the models only need to know
+    an image was attached (the image itself is kept in utils.attachments).
+    """
+    messages = []
+    for message in history:
+        content = message["content"]
+        blocks = content if isinstance(content, list) else [content]
+        parts = []
+        for block in blocks:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict) and block.get("type") == "text":
+                parts.append(block.get("text", ""))
+            elif isinstance(block, dict):
+                file = block.get("file", block)
+                name = file.get("orig_name") or Path(file.get("path", "")).name
+                parts.append(_image_note(name))
+        text = "\n".join(part for part in parts if part)
+        if text:
+            messages.append({"role": message["role"], "content": text})
+    return messages
+
+
+def respond(message, history, pending_image=None):
+    """Send the user message (and any attached image) to the Supervisor."""
+    message = (message or "").strip()
+    no_change = ("", history, gr.update(), pending_image, gr.update())
+
+    if not message and not pending_image:
+        return no_change
 
     history = history or []
-    messages = history[-10:].copy()
-    messages.append({"role": "user", "content": message})
+    messages = to_llm_messages(history[-10:])
+    new_turn = []
+
+    if pending_image:
+        try:
+            image = set_image(pending_image)
+        except ValueError as error:
+            gr.Warning(str(error))
+            return (message, history, gr.update(), None, gr.update(visible=False))
+
+        message = message or "Describe this image."
+        messages.append({
+            "role": "user",
+            "content": f"{_image_note(image.name)}\n{message}",
+        })
+        new_turn.append({"role": "user", "content": {"path": image.path}})
+    else:
+        messages.append({"role": "user", "content": message})
 
     assistant_reply = run_turn(messages, ask_supervisor)
 
+    history.extend(new_turn)
     history.append({"role": "user", "content": message})
     history.append({"role": "assistant", "content": assistant_reply})
 
-    # Hide the welcome panel once the conversation has started
-    return "", history, gr.update(visible=False)
+    # Clear the box and the attachment preview; hide the welcome panel
+    return "", history, gr.update(visible=False), None, gr.update(visible=False)
+
+
+def attach_image(path):
+    """Show a preview of the image chosen with the 📎 button."""
+    try:
+        check_image(path)
+    except ValueError as error:
+        gr.Warning(str(error))
+        return None, gr.update(visible=False), gr.update()
+    return path, gr.update(visible=True), path
+
+
+def remove_attachment():
+    return None, gr.update(visible=False), None
 
 
 def dictate(text, audio_data):
@@ -102,7 +169,8 @@ def dictate(text, audio_data):
 def clear_chat():
     """Reset the conversation and bring back the welcome panel."""
     clear_pending()
-    return [], gr.update(visible=True)
+    clear_image()
+    return [], gr.update(visible=True), None, gr.update(visible=False)
 
 
 def open_calendar():
@@ -394,6 +462,104 @@ footer{ display:none !important; }
 
 .input-box textarea{
     padding-right:48px !important;
+    padding-left:46px !important;
+}
+
+/* 📎 attach button inside the message box (left side) */
+#attach-btn{
+    --clip-icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48'/%3E%3C/svg%3E");
+    position:absolute !important;
+    left:8px;
+    top:50%;
+    transform:translateY(-50%);
+    z-index:5;
+    width:34px !important;
+    min-width:34px !important;
+    max-width:34px !important;
+    height:34px !important;
+    padding:0 !important;
+    border:none !important;
+    border-radius:50% !important;
+    background:transparent !important;
+    box-shadow:none !important;
+    color:var(--text-dim) !important;
+    font-size:0 !important;
+}
+
+#attach-btn::before{
+    content:"";
+    display:block;
+    width:18px;
+    height:18px;
+    margin:auto;
+    background-color:currentColor;
+    -webkit-mask:var(--clip-icon) center / contain no-repeat;
+    mask:var(--clip-icon) center / contain no-repeat;
+}
+
+#attach-btn:hover{
+    background:var(--surface-alt) !important;
+    color:var(--text-main) !important;
+}
+
+/* Thumbnail of the image waiting to be sent */
+.attach-preview{
+    position:relative;
+    width:72px !important;
+    max-width:72px !important;
+    margin:4px 0 0 4px;
+    flex:0 0 auto !important;
+}
+
+#attach-thumb{
+    width:64px !important;
+    height:64px !important;
+    border-radius:10px !important;
+    overflow:hidden;
+    border:1px solid var(--border) !important;
+}
+
+#attach-thumb img{
+    width:64px !important;
+    height:64px !important;
+    object-fit:cover !important;
+}
+
+#attach-remove{
+    position:absolute !important;
+    top:-6px;
+    right:0;
+    z-index:6;
+    width:20px !important;
+    min-width:20px !important;
+    max-width:20px !important;
+    height:20px !important;
+    padding:0 !important;
+    border-radius:50% !important;
+    background:var(--text-main) !important;
+    color:#fff !important;
+    font-size:11px !important;
+    line-height:20px !important;
+    border:none !important;
+    box-shadow:none !important;
+}
+
+/* Images inside chat bubbles */
+.main-chatbot img{
+    max-width:260px !important;
+    max-height:260px !important;
+    border-radius:10px !important;
+}
+
+/* No Gradio loading bar/timer over the message box (the mic button
+   shows its own state, and the chat shows when a reply is coming) */
+.input-box .eta-bar,
+.input-box .progress-bar,
+.input-box .progress-level,
+.input-box .progress-text,
+.input-box .meta-text,
+.input-box .loader{
+    display:none !important;
 }
 
 #mic-btn{
@@ -439,8 +605,40 @@ footer{ display:none !important; }
 }
 
 #mic-btn.busy{
-    opacity:.45;
     pointer-events:none;
+}
+
+#mic-btn.busy::before{
+    opacity:.45;
+}
+
+/* Status label to the left of the mic: "Listening…" / "Transcribing…" */
+#mic-btn::after{
+    content:none;
+    position:absolute;
+    right:calc(100% + 6px);
+    top:50%;
+    transform:translateY(-50%);
+    font-size:13px;
+    font-weight:500;
+    white-space:nowrap;
+    pointer-events:none;
+}
+
+#mic-btn.recording::after{
+    content:"● Listening…";
+    color:#dc2626;
+}
+
+#mic-btn.busy::after{
+    content:"Transcribing…";
+    color:var(--text-dim);
+}
+
+/* Keep typed text clear of the label */
+.input-box:has(#mic-btn.recording) textarea,
+.input-box:has(#mic-btn.busy) textarea{
+    padding-right:150px !important;
 }
 
 @keyframes mic-pulse{
@@ -598,6 +796,19 @@ with gr.Blocks(
                     elem_classes="main-chatbot",
                 )
 
+                # Preview of an image chosen with 📎 (until it is sent)
+                with gr.Row(visible=False, elem_classes="attach-preview") as attach_preview:
+                    preview_image = gr.Image(
+                        show_label=False,
+                        interactive=False,
+                        container=False,
+                        buttons=[],
+                        height=64,
+                        width=64,
+                        elem_id="attach-thumb",
+                    )
+                    remove_image = gr.Button("✕", elem_id="attach-remove")
+
                 with gr.Row(elem_classes="input-row"):
                     with gr.Column(scale=8, elem_classes="input-box"):
                         textbox = gr.Textbox(
@@ -605,26 +816,41 @@ with gr.Blocks(
                             show_label=False,
                             container=False,
                         )
+                        attach = gr.UploadButton(
+                            "Attach image",
+                            file_types=["image"],
+                            type="filepath",
+                            elem_id="attach-btn",
+                        )
                         mic = gr.Button("Voice input", elem_id="mic-btn")
                     send = gr.Button("Send", elem_id="send-btn", scale=1)
 
                 # Carries the recording from the browser to dictate()
                 mic_audio = gr.Textbox(visible=False)
+                # Path of the image waiting to be sent with the next message
+                pending_image = gr.State(None)
 
     # ==================================================================== #
     #  Events
     # ==================================================================== #
 
-    send.click(
-        fn=respond,
-        inputs=[textbox, chatbot],
-        outputs=[textbox, chatbot, welcome_panel],
+    chat_inputs = [textbox, chatbot, pending_image]
+    chat_outputs = [textbox, chatbot, welcome_panel, pending_image, attach_preview]
+
+    send.click(fn=respond, inputs=chat_inputs, outputs=chat_outputs)
+    textbox.submit(fn=respond, inputs=chat_inputs, outputs=chat_outputs)
+
+    attach.upload(
+        fn=attach_image,
+        inputs=attach,
+        outputs=[pending_image, attach_preview, preview_image],
+        show_progress="hidden",
     )
 
-    textbox.submit(
-        fn=respond,
-        inputs=[textbox, chatbot],
-        outputs=[textbox, chatbot, welcome_panel],
+    remove_image.click(
+        fn=remove_attachment,
+        outputs=[pending_image, attach_preview, preview_image],
+        show_progress="hidden",
     )
 
     # First click starts recording in the browser; second click stops it
@@ -634,14 +860,17 @@ with gr.Blocks(
         inputs=[textbox, mic_audio],
         outputs=[textbox, mic_audio],
         js=MIC_JS,
+        # The mic button shows its own state; no loading bar on the box
+        show_progress="hidden",
     ).then(
         fn=None,
         js="() => document.querySelector('#mic-btn')?.classList.remove('busy')",
+        show_progress="hidden",
     )
 
     new_chat.click(
         fn=clear_chat,
-        outputs=[chatbot, welcome_panel],
+        outputs=[chatbot, welcome_panel, pending_image, attach_preview],
     )
 
     for ex_btn in (ex1, ex2, ex3, ex4):

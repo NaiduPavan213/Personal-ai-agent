@@ -14,6 +14,7 @@ single-user, locally run assistant.
 
 from dataclasses import dataclass
 from itertools import count
+from pathlib import Path
 
 from integrations.gmail import send_email
 
@@ -24,6 +25,7 @@ class EmailDraft:
     to: str
     subject: str
     body: str
+    attachment: str | None = None   # path of an attached image
 
 
 CONFIRM_REPLIES = {
@@ -38,10 +40,15 @@ _ids = count(1)
 _pending: EmailDraft | None = None
 
 
-def save_draft(to: str, subject: str, body: str) -> EmailDraft:
+def save_draft(
+    to: str,
+    subject: str,
+    body: str,
+    attachment: str | None = None,
+) -> EmailDraft:
     """Store a new draft, replacing any previous one."""
     global _pending
-    _pending = EmailDraft(next(_ids), to, subject, body)
+    _pending = EmailDraft(next(_ids), to, subject, body, attachment)
     return _pending
 
 
@@ -60,7 +67,11 @@ def format_draft(draft: EmailDraft) -> str:
         f"**To:** {draft.to}\n"
         f"**Subject:** {draft.subject}\n\n"
         f"{draft.body}\n\n"
-        "---\n"
+        + (
+            f"📎 **Attachment:** {Path(draft.attachment).name}\n\n"
+            if draft.attachment else ""
+        )
+        + "---\n"
         "Reply **send** to send it, or **cancel** to discard it. "
         "Any other reply discards this draft."
     )
@@ -90,7 +101,12 @@ def handle_pending_reply(message: str) -> str | None:
 
     if reply in CONFIRM_REPLIES:
         try:
-            message_id = send_email(draft.to, draft.subject, draft.body)
+            message_id = send_email(
+                draft.to,
+                draft.subject,
+                draft.body,
+                attachment_path=draft.attachment,
+            )
         except Exception as error:
             return f"❌ The email could not be sent: {error}"
         return (

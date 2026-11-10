@@ -1,6 +1,8 @@
 
 import base64
-from email.mime.text import MIMEText
+import mimetypes
+from email.message import EmailMessage
+from pathlib import Path
 
 from googleapiclient.discovery import build
 
@@ -13,14 +15,26 @@ def get_gmail_service():
     return build("gmail", "v1", credentials=creds)
 
 
-def send_email(to, subject, body):
-    """Send an email using Gmail API."""
+def send_email(to, subject, body, attachment_path=None):
+    """Send an email using Gmail API, optionally with one attached file."""
 
     service = get_gmail_service()
 
-    message = MIMEText(body)
+    message = EmailMessage()
     message["to"] = to
     message["subject"] = subject
+    message.set_content(body)
+
+    if attachment_path:
+        file = Path(attachment_path)
+        mime_type = mimetypes.guess_type(file.name)[0] or "application/octet-stream"
+        maintype, subtype = mime_type.split("/", 1)
+        message.add_attachment(
+            file.read_bytes(),
+            maintype=maintype,
+            subtype=subtype,
+            filename=file.name,
+        )
 
     raw_message = base64.urlsafe_b64encode(
         message.as_bytes()
